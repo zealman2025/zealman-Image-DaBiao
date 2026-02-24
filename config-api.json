@@ -1,0 +1,18 @@
+{
+    "selected_model": "aliyun",
+    "doubao_api_key": "你的豆包API Key",
+    "doubao_model": "doubao-seed-2-0-pro-260215",
+    "xai_api_key": "你的XAI API Key",
+    "xai_model": "grok-4",
+    "gptsapi_api_key": "你的GPTsAPI API Key",
+    "gptsapi_model": "gemini-3-flash-preview",
+    "siliconflow_api_key": "你的硅基流动API Key",
+    "siliconflow_model": "zai-org/GLM-4.6V",
+    "aliyun_api_key": "你的阿里云API Key",
+    "aliyun_model": "qwen3.5-plus",
+    "prompt_supplement_text_1": "1纯文本输出,不要评论,不要发表序言",
+    "prompt_supplement_text_2": "2不要使用任何 Markdown 格式",
+    "prompt_supplement_text_3": "3输出纯英文版本",
+    "prompt_supplement_text_4": "4输出纯中文json版本",
+    "prompt_supplement_text_5": "5输出纯英文json版本"
+}

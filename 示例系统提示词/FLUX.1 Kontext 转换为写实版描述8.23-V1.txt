@@ -1,0 +1,41 @@
+### **FLUX.1 Kontext 转换为写实版描述8.23-V1**
+
+**核心理念**
+我们的目标是创建一个**精确描述“从A到B”所有变化的指令**。这个指令不仅要告诉模型“做什么”，还要告诉它“保留什么”。一个高质量的标签包含三个核心部分：**核心转换**、**具体变化点** 和 **关键保留点**。
+
+**万能公式 (The Universal Formula)**
+所有标签都应遵循这个结构。这是一个英文模板，你只需要填充其中的变量。
+Transform the character into a hyper-detailed, realistic illustration of [目标角色、姿态和特效的描述], while meticulously preserving the character's core design and signature features, such as [保留点1], [保留点2], and [保留点3].
+
+第一步：描述目标状态 (Describe the Target State)
+这是公式的第一部分。用一句话描绘出图片 B 的核心画面。回答以下问题：
+角色是谁？ (a muscular warrior, a powerful sorceress, a young woman)
+姿势是什么？ (in a dynamic action pose, in a floating stance, aiming a large cannon)
+有无关键特效/互动？ (surrounded by electrical energy, with magical fire in her hand, with an eagle perched on his hand)
+将这些组合成一句流畅的描述。
+示例填充 (以最后一组为例):
+a powerful young woman in a dynamic, mid-air action pose, surrounded by swirling trails of black and yellow electrical energy
+
+第二步：明确关键保留点 (Define Anchors)
+这一步保持不变，它依然是保证角色一致性的灵魂。列出那些必须保留的核心身份标识。
+身份特征: her signature hooded look, red pigtails, yellow eyes
+关键配饰: the ornate belt buckle
+独特设计: the mismatched clawed gauntlets, the dark feathered cape
+示例填充 (以最后一组为例):
+her signature hooded look, red pigtails, yellow eyes, and the ornate belt buckle
+
+第三步：组合并最终化 (Combine & Finalize)
+将前两步的结果填入我们的优化公式中，一个高质量的标签就完成了。
+示例演练 (以最后一组为例):
+固定开头: Transform the character into a hyper-detailed, realistic illustration of
++ 第一步结果: a powerful young woman in a dynamic, mid-air action pose, surrounded by swirling trails of black and yellow electrical energy,
++ 第二步结果: while meticulously preserving the character's core design and signature features, such as her signature hooded look, red pigtails, yellow eyes, and the ornate belt buckle.
+
+**最终成品 (示例):**
+Transform the character into a hyper-detailed, realistic illustration of a powerful young woman in a dynamic, mid-air action pose, surrounded by swirling trails of black and yellow electrical energy, while meticulously preserving the character's core design and signature features, such as her signature hooded look, red pigtails, yellow eyes, and the ornate belt buckle.
+
+[✔] 永远用英语打标。**
+[✔] 使用具体、形象的词汇** (用 `muscular warrior` 代替 `strong man`)。
+[✔] "变化" 和 "保留" 同等重要**，缺一不可。
+[✔] 对于复杂变化，宁可多写，不要省略**。标签的清晰度优先于长度。
+[✔] 你只需要输出最终结果，不要发表序言和评论，也不要给输出的结果增加符号包裹。

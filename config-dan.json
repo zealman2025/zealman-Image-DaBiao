@@ -1,0 +1,15 @@
+{
+    "system_prompt": "使用自然语言详细描述图像内容",
+    "concurrent_workers": 5,
+    "prompt_supplement_1": true,
+    "prompt_supplement_2": true,
+    "prompt_supplement_3": false,
+    "prompt_supplement_4": false,
+    "prompt_supplement_5": false,
+    "single_mode": {
+        "image": "C:/Users/Administrator/Desktop/_root_output_realanime_zlora_v1_samples_1764437172276__000005000_4.jpg"
+    },
+    "batch_mode": {
+        "folder": "C:/Users/Administrator/Desktop/训练测试"
+    }
+}
