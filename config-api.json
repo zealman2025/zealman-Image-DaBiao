@@ -1,0 +1,14 @@
+{
+    "selected_model": "autodl",
+    "doubao_api_key": "",
+    "doubao_model": "doubao-seed-2-0-pro-260215",
+    "autodl_api_key": "",
+    "autodl_model": "qwen3.6-plus",
+    "aliyun_api_key": "",
+    "aliyun_model": "qwen3.6-plus",
+    "prompt_supplement_text_1": "1纯文本输出,不要评论,不要发表序言",
+    "prompt_supplement_text_2": "2不要使用任何 Markdown 格式",
+    "prompt_supplement_text_3": "3输出纯英文版本",
+    "prompt_supplement_text_4": "4输出纯中文json版本",
+    "prompt_supplement_text_5": "5输出纯英文json版本"
+}

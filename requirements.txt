@@ -1,0 +1,5 @@
+requests
+Pillow
+openai
+tkinterdnd2
+google-genai>=0.3.0
