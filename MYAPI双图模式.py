@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageTk
 import re
 import datetime
@@ -192,12 +193,16 @@ class ImageComparisonTool:
         # 批量处理控制标志
         self.batch_processing = False
         self.stop_batch_processing = False
-        
+
         # 批量处理状态管理
         self.batch_processed_files = []  # 已处理的文件列表
         self.batch_current_index = 0     # 当前处理位置
         self.batch_total_files = 0       # 总文件数量
         self.batch_folders = {"a": "", "b": ""}  # 保存的文件夹路径
+
+        # 并发处理控制
+        self.concurrent_workers = 5  # 默认并发数
+        self.batch_lock = threading.Lock()
         self.process_mode = "process_all"  # 处理模式：process_all, process_missing_only, overwrite_all
         
         # 创建界面
@@ -290,6 +295,7 @@ class ImageComparisonTool:
             "system_prompt": "请对比这两张图片，详细描述它们的差异和相似之处。",
             "single_mode": {"image_a": "", "image_b": ""},
             "batch_mode": {"folder_a": "", "folder_b": ""},
+            "concurrent_workers": 5,
         }
         try:
             with open("config-shuang.json", "r", encoding="utf-8") as f:
@@ -348,6 +354,17 @@ class ImageComparisonTool:
             self.folder_a_entry.insert(0, self.config["batch_mode"].get("folder_a", ""))
             self.folder_b_entry.delete(0, tk.END)
             self.folder_b_entry.insert(0, self.config["batch_mode"].get("folder_b", ""))
+
+        # 加载并发数配置
+        if hasattr(self, 'concurrent_var'):
+            try:
+                concurrent_workers = int(self.config.get("concurrent_workers", 5))
+            except Exception:
+                concurrent_workers = 5
+            if concurrent_workers not in (5, 10, 15, 20):
+                concurrent_workers = 5
+            self.concurrent_var.set(str(concurrent_workers))
+            self.concurrent_workers = concurrent_workers
 
         if hasattr(self, "api_key_entry"):
             self._last_selected_model_for_api = self.model_var.get()
@@ -535,6 +552,13 @@ class ImageComparisonTool:
             elif "批量模式" in current_tab:
                 self.config["batch_mode"]["folder_a"] = self.folder_a_entry.get()
                 self.config["batch_mode"]["folder_b"] = self.folder_b_entry.get()
+
+            # 保存并发数配置（不依赖当前TAB，便于随时调整）
+            if hasattr(self, 'concurrent_var'):
+                try:
+                    self.config["concurrent_workers"] = int(self.concurrent_var.get())
+                except Exception:
+                    self.config["concurrent_workers"] = 5
 
             self.save_config()
             # 不显示日志消息，避免频繁提示
@@ -876,11 +900,22 @@ class ImageComparisonTool:
         ttk.Button(folder_b_frame, text="选择目录", command=self.browse_folder_b,
                   style='Custom.TButton').grid(row=0, column=1)
 
+        # 并发数选择
+        concurrent_frame = ttk.Frame(dirs_frame)
+        concurrent_frame.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        ttk.Label(concurrent_frame, text="并发数:", font=(self.custom_font, 9, 'bold')).pack(side=tk.LEFT, padx=(0, 6))
+        self.concurrent_var = tk.StringVar(value=str(self.concurrent_workers))
+        self.concurrent_combo = ttk.Combobox(concurrent_frame, textvariable=self.concurrent_var,
+                                             values=["5", "10", "15", "20"],
+                                             state="readonly", width=8, font=(self.custom_font, 9))
+        self.concurrent_combo.pack(side=tk.LEFT)
+        self.concurrent_combo.bind("<<ComboboxSelected>>", lambda e: self.auto_save_config())
+
         # 批量处理说明
         batch_info = ttk.Label(dirs_frame,
-                              text="💡 批量模式将自动匹配同名文件进行对比，结果保存为txt文件\n选择A文件夹时会自动检测对应的B文件夹",
+                              text="💡 批量模式将自动匹配同名文件并发对比，结果保存为txt文件\n选择A文件夹时会自动检测对应的B文件夹",
                               style='Subtitle.TLabel')
-        batch_info.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        batch_info.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
 
         # 右侧按钮区域
         button_frame = ttk.Frame(dirs_container)
@@ -1536,7 +1571,14 @@ class ImageComparisonTool:
         elif "批量模式" in current_tab:
             self.config["batch_mode"]["folder_a"] = self.folder_a_entry.get()
             self.config["batch_mode"]["folder_b"] = self.folder_b_entry.get()
-        
+
+        # 保存并发数配置
+        if hasattr(self, 'concurrent_var'):
+            try:
+                self.config["concurrent_workers"] = int(self.concurrent_var.get())
+            except Exception:
+                self.config["concurrent_workers"] = 5
+
         self.save_config()
 
     def call_api(self, image_a_path, image_b_path, prompt):
@@ -1959,8 +2001,45 @@ class ImageComparisonTool:
         finally:
             self.generate_button.config(state="normal", text="🚀 开始对比分析")
     
-    def batch_mode_process(self, prompt):
-        """批量模式处理"""
+    def _process_single_pair(self, folder_a, folder_b, file_a, file_b, prompt, index, total):
+        """处理单对图片（用于并发处理）"""
+        try:
+            if self.stop_batch_processing:
+                return False, file_a, file_b, "已停止"
+
+            image_a_path = os.path.join(folder_a, file_a)
+            image_b_path = os.path.join(folder_b, file_b)
+            name_b = os.path.splitext(file_b)[0]
+
+            print(f"[并发] 处理第 {index}/{total} 组: {file_a} vs {file_b}")
+            self.append_log("批量-开始处理一组", {"index": index, "total": total, "A": file_a, "B": file_b})
+
+            # 调用API
+            result = self.call_api(image_a_path, image_b_path, prompt)
+
+            if result.startswith("API调用失败") or result.startswith("API调用异常"):
+                print(f"[并发] 失败: {file_a} vs {file_b} - {result[:100]}")
+                return False, file_a, file_b, result
+
+            # 保存结果到文件（与B图片同名）
+            output_file = os.path.join(folder_b, f"{name_b}.txt")
+            try:
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(result)
+                print(f"[并发] 成功: {file_a} vs {file_b} - 结果已保存到 {output_file}")
+                return True, file_a, file_b, output_file
+            except Exception as e:
+                error_msg = f"保存文件失败: {str(e)}"
+                print(f"[并发] {error_msg}")
+                return False, file_a, file_b, error_msg
+
+        except Exception as e:
+            error_msg = f"处理异常: {str(e)}"
+            print(f"[并发] {error_msg}")
+            return False, file_a, file_b, error_msg
+
+    def batch_mode_process(self, prompt, concurrent_workers=None):
+        """批量模式处理（并发版本）"""
         try:
             folder_a = self.folder_a_entry.get().strip()
             folder_b = self.folder_b_entry.get().strip()
@@ -1979,148 +2058,157 @@ class ImageComparisonTool:
                 print(f"错误: 目录B不存在 - {folder_b}")
                 self.progress_var.set("错误 - 目录B不存在")
                 return
-            
+
+            # 解析并发数
+            if concurrent_workers is None:
+                try:
+                    concurrent_workers = int(self.concurrent_var.get())
+                except Exception:
+                    concurrent_workers = 5
+            if concurrent_workers not in (5, 10, 15, 20):
+                concurrent_workers = 5
+
             print("开始处理批量模式...")
             print(f"目录A: {folder_a}")
             print(f"目录B: {folder_b}")
             print(f"处理模式: {self.process_mode}")
-            self.append_log("批量-开始", {"A": folder_a, "B": folder_b, "mode": self.process_mode})
-            
+            print(f"并发数: {concurrent_workers}")
+            self.append_log("批量-开始", {"A": folder_a, "B": folder_b, "mode": self.process_mode, "concurrent": concurrent_workers})
+
             # 获取目录中的图片文件
             image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.gif')
             files_a = [f for f in os.listdir(folder_a) if f.lower().endswith(image_extensions)]
             files_b = [f for f in os.listdir(folder_b) if f.lower().endswith(image_extensions)]
-            
+
             if not files_a:
                 print("错误: 目录A中没有找到图片文件")
                 return
-            
+
             if not files_b:
                 print("错误: 目录B中没有找到图片文件")
                 return
-            
+
             # 按文件名排序
             files_a.sort()
             files_b.sort()
-            
+
             print(f"目录A中找到 {len(files_a)} 个图片文件")
             print(f"目录B中找到 {len(files_b)} 个图片文件")
             self.append_log("批量-文件统计", {"A_images": len(files_a), "B_images": len(files_b)})
 
-            # 根据处理模式决定要处理的文件
-            files_to_process = []
-            
-            if self.process_mode == "process_missing_only":
-                # 仅处理无txt的图片（txt 与 B 图片同名）
-                for file_a in files_a:
-                    name_a = os.path.splitext(file_a)[0]
-                    file_b = next((b for b in files_b if os.path.splitext(b)[0] == name_a), None)
-                    if not file_b:
-                        continue  # 无对应 B，主循环会跳过
+            # 构建 B 文件名（去扩展名）-> 文件名 的映射，便于快速查找
+            files_b_map = {os.path.splitext(b)[0]: b for b in files_b}
+
+            # 根据处理模式与文件匹配，确定真正可处理的图片对
+            pairs_to_process = []  # [(file_a, file_b)]
+            skipped_count = 0
+            for file_a in files_a:
+                name_a = os.path.splitext(file_a)[0]
+                file_b = files_b_map.get(name_a)
+                if not file_b:
+                    skipped_count += 1
+                    print(f"跳过: 在B文件夹中未找到对应的图片 {file_a}")
+                    continue
+
+                if self.process_mode == "process_missing_only":
                     name_b = os.path.splitext(file_b)[0]
                     txt_file = os.path.join(folder_b, f"{name_b}.txt")
-                    if not os.path.exists(txt_file):
-                        files_to_process.append(file_a)
-                
-                print(f"将处理 {len(files_to_process)} 个无txt的图片文件")
-                self.append_log("批量-仅处理无txt", {"count": len(files_to_process)})
-            else:
-                # 处理所有图片（覆盖模式或全新处理）
-                files_to_process = files_a
-                print(f"将处理所有 {len(files_to_process)} 个图片文件")
-                self.append_log("批量-处理所有", {"count": len(files_to_process)})
+                    if os.path.exists(txt_file):
+                        continue
 
-            if not files_to_process:
+                pairs_to_process.append((file_a, file_b))
+
+            if self.process_mode == "process_missing_only":
+                self.append_log("批量-仅处理无txt", {"count": len(pairs_to_process)})
+            else:
+                self.append_log("批量-处理所有", {"count": len(pairs_to_process)})
+
+            total_pairs = len(pairs_to_process)
+            if total_pairs == 0:
                 print("没有需要处理的文件")
                 self.progress_var.set("没有需要处理的文件")
                 return
 
-            # 处理文件
+            print(f"将以 {concurrent_workers} 个并发处理 {total_pairs} 组图片")
+
+            # 并发处理
             processed_count = 0
             failed_count = 0
-            skipped_count = 0
-            for i, file_a in enumerate(files_to_process):
-                # 检查是否需要停止处理
-                if self.stop_batch_processing:
-                    print("批量处理已被用户中断")
-                    break
 
-                # 查找对应的B图片
-                name_a = os.path.splitext(file_a)[0]
-                file_b = None
-                
-                # 在B文件夹中查找同名文件（忽略扩展名）
-                for b_file in files_b:
-                    b_name = os.path.splitext(b_file)[0]
-                    if b_name == name_a:
-                        file_b = b_file
+            with ThreadPoolExecutor(max_workers=concurrent_workers) as executor:
+                future_to_pair = {}
+                for i, (file_a, file_b) in enumerate(pairs_to_process):
+                    if self.stop_batch_processing:
+                        break
+                    future = executor.submit(
+                        self._process_single_pair,
+                        folder_a, folder_b, file_a, file_b, prompt,
+                        i + 1, total_pairs
+                    )
+                    future_to_pair[future] = (file_a, file_b)
+
+                for future in as_completed(future_to_pair):
+                    if self.stop_batch_processing:
+                        # 取消未开始的任务
+                        for f in future_to_pair:
+                            if not f.done():
+                                f.cancel()
                         break
 
-                if not file_b:
-                    print(f"跳过: 在B文件夹中未找到对应的图片 {file_a}")
-                    skipped_count += 1
-                    continue
-
-                name_b = os.path.splitext(file_b)[0]
-                image_a_path = os.path.join(folder_a, file_a)
-                image_b_path = os.path.join(folder_b, file_b)
-
-                print(f"处理第 {i+1}/{len(files_to_process)} 组: {file_a} vs {file_b}")
-                self.progress_var.set(f"正在处理第 {i+1}/{len(files_to_process)} 组图片...")
-                self.append_log("批量-开始处理一组", {"index": i+1, "total": len(files_to_process), "A": file_a, "B": file_b})
-
-                # 再次检查是否需要停止处理
-                if self.stop_batch_processing:
-                    print("批量处理已被用户中断")
-                    break
-
-                # 调用API
-                result = self.call_api(image_a_path, image_b_path, prompt)
-
-                if result.startswith("API调用失败") or result.startswith("API调用异常"):
-                    print(f"失败: {result}")
-                    failed_count += 1
-                    self.append_log("批量-失败", result[:2000])
-                    # 继续处理后续文件
-                    continue
-                else:
-                    # 保存结果到文件（与B图片同名）
-                    output_file = os.path.join(folder_b, f"{name_b}.txt")
+                    file_a, file_b = future_to_pair[future]
                     try:
-                        with open(output_file, 'w', encoding='utf-8') as f:
-                            f.write(result)
-                        print(f"成功: 结果已保存到 {output_file}")
-                        processed_count += 1
-                        self.append_log("批量-成功", {"saved_to": output_file})
+                        success, fa, fb, result = future.result()
+                        with self.batch_lock:
+                            if success:
+                                processed_count += 1
+                                self.append_log("批量-成功", {"saved_to": result, "A": fa, "B": fb})
+                            else:
+                                failed_count += 1
+                                self.append_log("批量-失败", {"A": fa, "B": fb, "error": str(result)[:500]})
+
+                            current = processed_count + failed_count
+                            progress_text = (f"正在处理 {current}/{total_pairs} "
+                                             f"(成功: {processed_count}, 失败: {failed_count})")
+                            try:
+                                self.root.after(0, lambda t=progress_text: self.progress_var.set(t))
+                            except Exception:
+                                self.progress_var.set(progress_text)
                     except Exception as e:
-                        print(f"保存文件失败: {str(e)}")
-                        failed_count += 1
-                        self.append_log("批量-保存失败", str(e))
-                        # 继续处理后续文件
-                        continue
-            
+                        with self.batch_lock:
+                            failed_count += 1
+                        error_msg = f"获取结果异常: {str(e)}"
+                        print(f"[并发] {error_msg}")
+                        self.append_log("批量-异常", {"A": file_a, "B": file_b, "error": error_msg})
+
+            # 汇总
             if self.stop_batch_processing:
-                print(f"批量处理已中断 - 成功 {processed_count}，失败 {failed_count}，跳过 {skipped_count}，总计 {len(files_to_process)}")
+                print(f"批量处理已中断 - 成功 {processed_count}，失败 {failed_count}，跳过 {skipped_count}，总计 {total_pairs}")
                 self.progress_var.set(f"批量处理中断 - 成功 {processed_count}，失败 {failed_count}，跳过 {skipped_count}")
-                self.append_log("批量-中断", {"success": processed_count, "failed": failed_count, "skipped": skipped_count, "total": len(files_to_process)})
+                self.append_log("批量-中断", {"success": processed_count, "failed": failed_count, "skipped": skipped_count, "total": total_pairs})
             else:
                 if failed_count > 0 or skipped_count > 0:
-                    print(f"批量处理完成（部分失败）- 成功 {processed_count}，失败 {failed_count}，跳过 {skipped_count}，总计 {len(files_to_process)}")
+                    print(f"批量处理完成（部分失败）- 成功 {processed_count}，失败 {failed_count}，跳过 {skipped_count}，总计 {total_pairs}")
                     self.progress_var.set(f"批量完成（部分失败）- 成功 {processed_count}，失败 {failed_count}，跳过 {skipped_count}")
-                    self.append_log("批量-完成(部分失败)", {"success": processed_count, "failed": failed_count, "skipped": skipped_count, "total": len(files_to_process)})
+                    self.append_log("批量-完成(部分失败)", {"success": processed_count, "failed": failed_count, "skipped": skipped_count, "total": total_pairs})
                 else:
-                    print(f"批量处理完成 - 成功 {processed_count}/{len(files_to_process)}")
-                    self.progress_var.set(f"批量处理完成 - 成功 {processed_count}/{len(files_to_process)}")
-                    self.append_log("批量-完成(全部成功)", {"success": processed_count, "total": len(files_to_process)})
+                    print(f"批量处理完成 - 成功 {processed_count}/{total_pairs}")
+                    self.progress_var.set(f"批量处理完成 - 成功 {processed_count}/{total_pairs}")
+                    self.append_log("批量-完成(全部成功)", {"success": processed_count, "total": total_pairs})
 
         except Exception as e:
             print(f"批量处理异常: {str(e)}")
+            import traceback
+            traceback.print_exc()
             self.progress_var.set("批量处理异常")
+            self.append_log("批量-异常", {"error": str(e)})
         finally:
             # 重置批量处理状态
             self.batch_processing = False
             self.stop_batch_processing = False
-            self.batch_generate_button.config(state="normal", text="🚀 开始批量处理")
+            try:
+                self.root.after(0, lambda: self.batch_generate_button.config(state="normal", text="🚀 开始批量处理"))
+            except Exception:
+                self.batch_generate_button.config(state="normal", text="🚀 开始批量处理")
     
     def handle_batch_button_click(self):
         """处理批量处理按钮点击事件"""
@@ -2229,10 +2317,21 @@ class ImageComparisonTool:
             except Exception:
                 pass
             
-            # 在主线程获取 prompt 后传入工作线程
+            # 在主线程获取 prompt 与并发数后传入工作线程
             prompt = self._get_effective_prompt()
+            try:
+                concurrent_workers = int(self.concurrent_var.get())
+            except Exception:
+                concurrent_workers = 5
+            if concurrent_workers not in (5, 10, 15, 20):
+                concurrent_workers = 5
+
             # 启动处理线程
-            threading.Thread(target=self.batch_mode_process, args=(prompt,), daemon=True).start()
+            threading.Thread(
+                target=self.batch_mode_process,
+                args=(prompt, concurrent_workers),
+                daemon=True,
+            ).start()
 
         except Exception as e:
             print(f"开始批量处理失败: {str(e)}")

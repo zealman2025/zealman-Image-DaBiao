@@ -241,7 +241,7 @@ class ImageAnalysisTool:
             
             # 批量处理状态管理
             self.process_mode = "process_all"  # 处理模式：process_all, process_missing_only, overwrite_all
-            self.concurrent_workers = 2  # 默认并发数
+            self.concurrent_workers = 5  # 默认并发数
             
             # 线程安全锁
             self.batch_lock = threading.Lock()
@@ -355,7 +355,7 @@ class ImageAnalysisTool:
             "autodl_api_key": "", "autodl_model": "Qwen3.5-397B-A17B",
             "aliyun_api_key": "", "aliyun_model": "qwen-vl-plus",
             "system_prompt": "请详细分析这张图片，描述图片的内容、风格、色彩、构图等特征。",
-            "concurrent_workers": 2,
+            "concurrent_workers": 5,
             "single_mode": {"image": ""}, "batch_mode": {"folder": ""},
         }
         try:
@@ -783,9 +783,9 @@ class ImageAnalysisTool:
         concurrent_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         ttk.Label(concurrent_frame, text="并发数:", font=(self.custom_font, 9)).pack(side=tk.LEFT, padx=(0, 5))
-        self.concurrent_var = tk.StringVar(value="2")
+        self.concurrent_var = tk.StringVar(value="5")
         self.concurrent_combo = ttk.Combobox(concurrent_frame, textvariable=self.concurrent_var,
-                                            values=["2", "4", "5", "10"],
+                                            values=["5", "10", "15", "20"],
                                             state="readonly", width=10, font=(self.custom_font, 9))
         self.concurrent_combo.pack(side=tk.LEFT)
         self.concurrent_combo.bind("<<ComboboxSelected>>", lambda e: self.auto_save_config())
@@ -1078,7 +1078,7 @@ class ImageAnalysisTool:
                 try:
                     self.config["concurrent_workers"] = int(self.concurrent_var.get())
                 except:
-                    self.config["concurrent_workers"] = 2
+                    self.config["concurrent_workers"] = 5
 
             # 检查当前选中的TAB来判断模式
             current_tab = self.work_notebook.tab(self.work_notebook.select(), "text")
@@ -1129,7 +1129,10 @@ class ImageAnalysisTool:
             
             # 加载并发数配置
             if hasattr(self, 'concurrent_var'):
-                concurrent_workers = self.config.get("concurrent_workers", 2)
+                concurrent_workers = self.config.get("concurrent_workers", 5)
+                # 兼容旧值，自动迁移到新选项
+                if concurrent_workers not in (5, 10, 15, 20):
+                    concurrent_workers = 5
                 self.concurrent_var.set(str(concurrent_workers))
                 self.concurrent_workers = concurrent_workers
             
@@ -1815,7 +1818,7 @@ class ImageAnalysisTool:
         try:
             concurrent_workers = int(self.concurrent_var.get())
         except:
-            concurrent_workers = 2
+            concurrent_workers = 5
         
         self.append_log("批量-开始", {
             "folder": folder_path, 
